@@ -64,6 +64,8 @@ class STTNInpaint:
             image = frames_hr[j]
             # 对每个去除部分进行切割和缩放
             for k in range(len(inpaint_area)):
+                if inpaint_area is None or k not in inpaint_area or inpaint_area[k] is None:
+                    continue  # 跳过处理
                 image_crop = image[inpaint_area[k][0]:inpaint_area[k][1], :, :]  # 切割
                 image_resize = cv2.resize(image_crop, (self.model_input_width, self.model_input_height))  # 缩放
                 frames_scaled[k].append(image_resize)  # 将缩放后的帧添加到对应列表
