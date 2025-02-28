@@ -291,6 +291,8 @@ class STTNVideoInpaint:
                 frames_hr.append(image)
                 for k in range(len(inpaint_area)):
                     # 裁剪、缩放并添加到帧字典
+                    if inpaint_area is None or k not in inpaint_area or inpaint_area[k] is None:
+                        continue  # 跳过处理
                     image_crop = image[inpaint_area[k][0]:inpaint_area[k][1], :, :]
                     image_resize = cv2.resize(image_crop, (self.sttn_inpaint.model_input_width, self.sttn_inpaint.model_input_height))
                     frames[k].append(image_resize)
