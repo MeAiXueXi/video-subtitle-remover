@@ -8,18 +8,13 @@ from typing import List
 import sys
 import os
 
-# 假设 config 文件和其他依赖已正确设置
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from backend import config
 from backend.inpaint.sttn.auto_sttn import InpaintGenerator
 from backend.inpaint.utils.sttn_utils import Stack, ToTorchFormatTensor
 
-# 定义图像预处理方式
-_to_tensors = transforms.Compose([
-    Stack(),  # 将图像堆叠为序列
-    ToTorchFormatTensor()  # 将堆叠的图像转化为PyTorch张量
-])
+_to_tensors = transforms.Compose([Stack(), ToTorchFormatTensor()])
 
 
 class STTNInpaint:
@@ -33,10 +28,6 @@ class STTNInpaint:
         self.ref_length = config.STTN_REFERENCE_LENGTH
 
     def __call__(self, input_frames: List[np.ndarray], input_mask: np.ndarray):
-        """
-        :param input_frames: 原视频帧
-        :param input_mask: 字幕区域mask
-        """
         _, mask = cv2.threshold(input_mask, 127, 1, cv2.THRESH_BINARY)
         mask = mask[:, :, None]
         H_ori, W_ori = mask.shape[:2]
@@ -45,10 +36,9 @@ class STTNInpaint:
         split_h = int(W_ori * 3 / 16)
         inpaint_area = self.get_inpaint_area_by_mask(H_ori, split_h, mask)
 
-        # 如果 inpaint_area 为空，默认处理整个画面
-        if not inpaint_area:  # 检查是否为空列表或 None
+        if not inpaint_area:
             print("[Warning] No inpaint area detected. Processing full frame.")
-            inpaint_area = [(0, H_ori)]  # 设置为整个画面高度
+            inpaint_area = [(0, H_ori)]
 
         frames_hr = copy.deepcopy(input_frames)
         frames_scaled = {}
@@ -197,7 +187,6 @@ class STTNVideoInpaint:
         if input_mask is None and self.mask_path:
             mask = self.sttn_inpaint.read_mask(self.mask_path)
         elif input_mask is None:
-            # 如果没有掩码，默认创建全屏掩码
             print("[Info] No mask provided. Creating full-screen mask.")
             mask = np.ones((frame_info['H_ori'], frame_info['W_ori']), dtype=np.uint8) * 255
             _, mask = cv2.threshold(mask, 127, 1, cv2.THRESH_BINARY)
@@ -218,37 +207,55 @@ class STTNVideoInpaint:
             frames_hr = []
             frames = {}
             comps = {}
-            for k in range(len(inpaint_area)):
-                frames[k] = []
+
+            # 读取帧并检查成功
             for j in range(start_f, end_f):
                 success, image = reader.read()
                 if not success:
+                    print(f"[Warning] Failed to read frame {j + 1}. Stopping at {len(frames_hr)} frames.")
                     break
                 frames_hr.append(image)
+
+            # 如果没有读取到任何帧，跳过此次循环
+            if not frames_hr:
+                print("[Warning] No frames read in this segment. Skipping.")
+                continue
+
+            # 初始化帧字典
+            for k in range(len(inpaint_area)):
+                frames[k] = []
+
+            # 填充 frames 字典
+            for j in range(len(frames_hr)):
+                image = frames_hr[j]
                 for k in range(len(inpaint_area)):
                     image_crop = image[inpaint_area[k][0]:inpaint_area[k][1], :, :]
                     image_resize = cv2.resize(image_crop, (self.sttn_inpaint.model_input_width, self.sttn_inpaint.model_input_height))
                     frames[k].append(image_resize)
+
+            # 处理每个修复区域
             for k in range(len(inpaint_area)):
                 comps[k] = self.sttn_inpaint.inpaint(frames[k])
-            if inpaint_area:
-                for j in range(end_f - start_f):
-                    if input_sub_remover is not None and input_sub_remover.gui_mode:
-                        original_frame = copy.deepcopy(frames_hr[j])
-                    else:
-                        original_frame = None
-                    frame = frames_hr[j]
-                    for k in range(len(inpaint_area)):
-                        comp = cv2.resize(comps[k][j], (frame_info['W_ori'], split_h if inpaint_area[k][1] - inpaint_area[k][0] == split_h else inpaint_area[k][1] - inpaint_area[k][0]))
-                        comp = cv2.cvtColor(np.array(comp).astype(np.uint8), cv2.COLOR_BGR2RGB)
-                        mask_area = mask[inpaint_area[k][0]:inpaint_area[k][1], :]
-                        frame[inpaint_area[k][0]:inpaint_area[k][1], :, :] = mask_area * comp + (1 - mask_area) * frame[inpaint_area[k][0]:inpaint_area[k][1], :, :]
-                    writer.write(frame)
-                    if input_sub_remover is not None:
-                        if tbar is not None:
-                            input_sub_remover.update_progress(tbar, increment=1)
-                        if original_frame is not None and input_sub_remover.gui_mode:
-                            input_sub_remover.preview_frame = cv2.hconcat([original_frame, frame])
+
+            # 处理实际读取的帧
+            for j in range(len(frames_hr)):
+                if input_sub_remover is not None and input_sub_remover.gui_mode:
+                    original_frame = copy.deepcopy(frames_hr[j])
+                else:
+                    original_frame = None
+                frame = frames_hr[j]
+                for k in range(len(inpaint_area)):
+                    comp = cv2.resize(comps[k][j], (frame_info['W_ori'], split_h if inpaint_area[k][1] - inpaint_area[k][0] == split_h else inpaint_area[k][1] - inpaint_area[k][0]))
+                    comp = cv2.cvtColor(np.array(comp).astype(np.uint8), cv2.COLOR_BGR2RGB)
+                    mask_area = mask[inpaint_area[k][0]:inpaint_area[k][1], :]
+                    frame[inpaint_area[k][0]:inpaint_area[k][1], :, :] = mask_area * comp + (1 - mask_area) * frame[inpaint_area[k][0]:inpaint_area[k][1], :, :]
+                writer.write(frame)
+                if input_sub_remover is not None:
+                    if tbar is not None:
+                        input_sub_remover.update_progress(tbar, increment=1)
+                    if original_frame is not None and input_sub_remover.gui_mode:
+                        input_sub_remover.preview_frame = cv2.hconcat([original_frame, frame])
+
         writer.release()
         reader.release()
 
