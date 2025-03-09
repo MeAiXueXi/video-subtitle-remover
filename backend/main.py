@@ -910,14 +910,18 @@ class SubtitleRemover:
 
 if __name__ == '__main__':
     multiprocessing.set_start_method("spawn")
-    # 1. 提示用户输入视频路径
-    video_path = input(f"Please input video or image file path: ").strip()
-    # 判断视频路径是不是一个目录，是目录的化，批量处理改目录下的所有视频文件
-    # 2. 按以下顺序传入字幕区域
-    # sub_area = (ymin, ymax, xmin, xmax)
-    # 3. 新建字幕提取对象
-    if is_video_or_image(video_path):
-        sd = SubtitleRemover(video_path, sub_area=None)
-        sd.run()
+    directory_path = input("Please input directory path: ").strip()
+
+    # 检查输入的路径是否为目录
+    if os.path.isdir(directory_path):
+        # 遍历目录获取所有 mp4 文件
+        for filename in os.listdir(directory_path):
+            if filename.endswith('.mp4'):
+                video_path = os.path.join(directory_path, filename)  # 获取完整路径
+                if is_video_or_image(video_path):
+                    sd = SubtitleRemover(video_path, sub_area=None)
+                    sd.run()
+                else:
+                    print(f'Invalid video path: {video_path}')
     else:
-        print(f'Invalid video path: {video_path}')
+        print(f'Invalid directory path: {directory_path}')
