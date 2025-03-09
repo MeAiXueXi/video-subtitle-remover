@@ -7,6 +7,9 @@ anconda
 torch2.5  
 torchvision0.20.0  
 torchaudio2.5.0  
+apt install ffmpeg  
+
+
 
 conda环境  
 conda create -n videoEnv python=3.8  
